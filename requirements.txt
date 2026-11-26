@@ -1,17 +1,34 @@
+# Web framework
 fastapi
 uvicorn
+python-multipart
+pydantic[email]
+
+# Database
 sqlalchemy
 psycopg2-binary
-python-dotenv
-python-multipart
-requests
-pymupdf
-python-docx
+pgvector
+
+# Auth
 pwdlib[argon2]
 PyJWT
-pydantic[email]
+
+# Config / HTTP
+python-dotenv
+requests
+
+# Document processing
+pymupdf
+python-docx
+pandas
+openpyxl
+xlrd
+python-pptx
+Pillow
+
+# AI / LLM
 numpy
+openai
 langgraph
 langchain-core
-openai
-pgvector
+tiktoken
