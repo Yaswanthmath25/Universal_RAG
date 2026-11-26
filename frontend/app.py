@@ -1,3 +1,4 @@
+import os
 
 import streamlit as st
 import requests
@@ -16,7 +17,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-API_URL = "http://127.0.0.1:8000"
+API_URL = os.getenv("API_URL", "http://127.0.0.1:8000")
 API_TIMEOUT = 30
 AI_TIMEOUT = 300
 UPLOAD_TIMEOUT = 300
