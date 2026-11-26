@@ -1,64 +1,222 @@
-from typing import List, Dict, Any
+import re
+import numpy as np
 
-import os
-import requests
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
 
-
-RERANKER_MODEL = "cross-encoder/ms-marco-MiniLM-L-6-v2"
-RERANKER_API = f"https://api-inference.huggingface.co/models/{RERANKER_MODEL}"
-HF_TOKEN = os.getenv("HF_TOKEN")
-
-
-def _call_reranker(question, chunk_texts):
-    headers = {}
-    if HF_TOKEN:
-        headers["Authorization"] = f"Bearer {HF_TOKEN}"
-
-    pairs = [[question, text] for text in chunk_texts]
-
-    response = requests.post(
-        RERANKER_API,
-        headers=headers,
-        json={"inputs": pairs, "options": {"wait_for_model": True}},
-        timeout=120
-    )
-    response.raise_for_status()
-    return response.json()
+from backend.services.embedding_service import generate_query_embedding
+from backend.services.vector_store import collection
 
 
-def rerank_documents(
-    question: str,
-    chunks: List[Dict[str, Any]],
-    top_k: int = 5
-) -> List[Dict[str, Any]]:
+SEMANTIC_WEIGHT = 0.60
+TFIDF_WEIGHT = 0.40
 
-    if not chunks or top_k <= 0:
+DEFAULT_TOP_K = 5
+MAX_CANDIDATES = 30
+NEIGHBOR_SCORE_FACTOR = 0.75
+
+
+def build_access_filter(role, user_id, document_id=None):
+
+    clauses = []
+
+    if role == "customer":
+        if not user_id:
+            raise ValueError("user_id is required for customer access")
+
+        clauses.append({
+            "$and": [
+                {"access_scope": "user_data"},
+                {"target_user_id": user_id},
+            ]
+        })
+
+    elif role != "admin":
+        raise ValueError(f"Unknown role: {role}")
+
+    if document_id:
+        clauses.append({"document_id": document_id})
+
+    if not clauses:
+        return None
+
+    if len(clauses) == 1:
+        return clauses[0]
+
+    return {"$and": clauses}
+
+
+def normalize_text(text):
+    text = text.lower()
+    text = re.sub(r"[^a-z0-9+#.\s]", " ", text)
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def calculate_tfidf_scores(question, documents):
+    if not documents:
+        return []
+    try:
+        vectorizer = TfidfVectorizer(
+            stop_words="english",
+            ngram_range=(1, 2),
+            sublinear_tf=True,
+        )
+        doc_vectors = vectorizer.fit_transform(
+            [normalize_text(d) for d in documents]
+        )
+        q_vector = vectorizer.transform([normalize_text(question)])
+        return cosine_similarity(q_vector, doc_vectors)[0].tolist()
+    except ValueError:
+        return [0.0] * len(documents)
+
+
+def calculate_semantic_scores(distances):
+    if len(distances) == 0:
+        return []
+    distances = np.array(distances, dtype=float)
+    return (1.0 / (1.0 + np.maximum(distances, 0.0))).tolist()
+
+
+def search_documents(
+    question,
+    top_k=DEFAULT_TOP_K,
+    document_id=None,
+    role="admin",
+    user_id=None,
+):
+
+    if top_k <= 0:
         return []
 
-    try:
-        chunk_texts = [chunk.get("text", "") for chunk in chunks]
-        scores_raw = _call_reranker(question, chunk_texts)
+    where_filter = build_access_filter(role, user_id, document_id)
 
-        # HF returns either [{"score": x}, ...] or [[score], ...]
-        scores = []
-        for item in scores_raw:
-            if isinstance(item, dict):
-                scores.append(float(item.get("score", 0.0)))
-            elif isinstance(item, list):
-                scores.append(float(item[0]) if item else 0.0)
-            else:
-                scores.append(float(item))
+    get_params = {"include": ["documents", "metadatas"]}
+    if where_filter:
+        get_params["where"] = where_filter
 
-        reranked = []
-        for chunk, score in zip(chunks, scores):
-            updated = dict(chunk)
-            updated["rerank_score"] = score
-            reranked.append(updated)
+    all_docs = collection.get(**get_params)
 
-        reranked.sort(key=lambda x: x["rerank_score"], reverse=True)
-        return reranked[:top_k]
+    if not all_docs["ids"]:
+        print(f"[RETRIEVAL] No docs for role={role} user_id={user_id}")
+        return []
 
-    except Exception as error:
-        print(f"[RERANKER] Falling back to original order: {error}")
-        # Graceful fallback — keep hybrid-retrieval order
-        return chunks[:top_k]
+    total_vectors = len(all_docs["ids"])
+    document_texts = all_docs["documents"]
+
+    query_embedding = generate_query_embedding(question)
+    candidate_count = min(total_vectors, max(top_k * 4, MAX_CANDIDATES))
+
+    search_params = {
+        "query_embeddings": [query_embedding],
+        "n_results": candidate_count,
+        "include": ["documents", "metadatas", "distances"],
+    }
+    if where_filter:
+        search_params["where"] = where_filter
+
+    semantic_results = collection.query(**search_params)
+
+    semantic_chunks = {}
+    if semantic_results["ids"] and semantic_results["ids"][0]:
+        for i, chunk_id in enumerate(semantic_results["ids"][0]):
+            semantic_chunks[chunk_id] = {
+                "distance": semantic_results["distances"][0][i]
+            }
+
+    tfidf_scores = calculate_tfidf_scores(question, document_texts)
+
+    semantic_ids = list(semantic_chunks.keys())
+    semantic_distances = [
+        semantic_chunks[cid]["distance"] for cid in semantic_ids
+    ]
+    semantic_scores = calculate_semantic_scores(semantic_distances)
+    semantic_score_map = dict(zip(semantic_ids, semantic_scores))
+
+    candidates = {}
+
+    for i, chunk_id in enumerate(all_docs["ids"]):
+        tfidf_score = float(tfidf_scores[i])
+        semantic_score = semantic_score_map.get(chunk_id, 0.0)
+        distance = (
+            semantic_chunks[chunk_id]["distance"]
+            if chunk_id in semantic_chunks
+            else None
+        )
+
+        candidates[chunk_id] = {
+            "text": all_docs["documents"][i],
+            "metadata": all_docs["metadatas"][i],
+            "distance": distance,
+            "semantic_score": semantic_score,
+            "tfidf_score": tfidf_score,
+            "relevance_score": (
+                SEMANTIC_WEIGHT * semantic_score
+                + TFIDF_WEIGHT * tfidf_score
+            ),
+        }
+
+    ranked = sorted(
+        candidates.values(),
+        key=lambda x: x["relevance_score"],
+        reverse=True,
+    )
+
+    selected = ranked[: min(total_vectors, max(top_k * 2, 10))]
+
+    neighbor_scores = {}
+    for item in selected:
+        metadata = item["metadata"]
+        doc_id = metadata.get("document_id")
+        chunk_number = metadata.get("chunk_number")
+        if doc_id is None or chunk_number is None:
+            continue
+        for nearby in (chunk_number - 1, chunk_number + 1):
+            if nearby <= 0:
+                continue
+            neighbor_id = f"{doc_id}_chunk_{nearby}"
+            propagated = item["relevance_score"] * NEIGHBOR_SCORE_FACTOR
+            neighbor_scores[neighbor_id] = max(
+                neighbor_scores.get(neighbor_id, 0.0),
+                propagated,
+            )
+
+    missing = [cid for cid in neighbor_scores if cid not in candidates]
+    if missing:
+        neighbor_get = {
+            "ids": missing,
+            "include": ["documents", "metadatas"],
+        }
+        if where_filter:
+            neighbor_get["where"] = where_filter
+        neighbors = collection.get(**neighbor_get)
+        for i, chunk_id in enumerate(neighbors["ids"]):
+            candidates[chunk_id] = {
+                "text": neighbors["documents"][i],
+                "metadata": neighbors["metadatas"][i],
+                "distance": None,
+                "semantic_score": 0.0,
+                "tfidf_score": 0.0,
+                "relevance_score": neighbor_scores[chunk_id],
+            }
+
+    final = sorted(
+        candidates.values(),
+        key=lambda x: x["relevance_score"],
+        reverse=True,
+    )
+
+    print(
+        f"[RETRIEVAL] role={role} user_id={user_id} "
+        f"filter={where_filter} total={total_vectors} "
+        f"final={len(final[:top_k])}"
+    )
+
+    return [
+        {
+            "text": item["text"],
+            "metadata": item["metadata"],
+            "distance": item["distance"],
+            "relevance_score": item["relevance_score"],
+        }
+        for item in final[:top_k]
+    ]
