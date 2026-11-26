@@ -90,13 +90,11 @@ def find_product(products, question: str):
 
     text = question.lower()
 
-    # Exact full name match first
     for product in products:
         product_name = product.name.lower()
         if product_name in text:
             return product
 
-    # Partial / word-level match
     question_words = [
         w for w in re.findall(r"[a-zA-Z0-9]+", text)
         if len(w) > 2
@@ -258,8 +256,59 @@ def choose_address(addresses, question: str):
 # ADDRESS PARSING
 # ============================================================
 
+def _heuristic_parse_address(address_text: str):
+    """
+    Try to parse a comma-separated address without calling the LLM.
+    Handles inputs like:
+        "ramalayam street, kakinada, andhra pradesh, 533001, india"
+    Returns a dict or None.
+    """
+    parts = [p.strip() for p in address_text.split(",") if p.strip()]
+
+    if len(parts) < 3:
+        return None
+
+    address_line1 = parts[0]
+    city = parts[1]
+
+    postal_code = ""
+    state = ""
+    country = "India"
+
+    for part in parts[2:]:
+        if re.fullmatch(r"\d{6}", part):
+            postal_code = part
+        elif part.lower() in ("india", "in"):
+            country = "India"
+        elif not state:
+            state = part
+
+    if len(parts) >= 4 and not state:
+        state = parts[2]
+
+    if not address_line1 or not city:
+        return None
+
+    return {
+        "address_line1": address_line1,
+        "address_line2": "",
+        "city": city,
+        "state": state,
+        "postal_code": postal_code,
+        "country": country,
+    }
+
+
 def parse_address_with_ollama(address_text: str):
 
+    # Fast path: try heuristic parser first (no LLM call needed)
+    heuristic = _heuristic_parse_address(address_text)
+
+    if heuristic:
+        print("[ADDRESS PARSER] Fast-path heuristic succeeded:", heuristic)
+        return heuristic
+
+    # Slow path: ask the LLM
     prompt = f"""
 Extract the shipping address from the user's message.
 
