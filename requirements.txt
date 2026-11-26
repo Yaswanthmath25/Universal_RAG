@@ -22,3 +22,4 @@ numpy
 langgraph
 langchain-core
 langchain-community
+PyJWT
