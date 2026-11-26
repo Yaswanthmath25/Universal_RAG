@@ -1,7 +1,6 @@
 
 fastapi
 uvicorn
-streamlit
 sqlalchemy
 psycopg2-binary
 python-dotenv
@@ -12,13 +11,10 @@ requests
 pymupdf
 python-docx
 passlib[bcrypt]
-
-# TF-IDF and relevance scoring
+python-jose[cryptography]
+PyJWT
 scikit-learn
 numpy
-
-# Agentic RAG
 langgraph
 langchain-core
 langchain-community
-PyJWT
