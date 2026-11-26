@@ -1,45 +1,30 @@
-import requests
+import os
+from openai import OpenAI
 
 
-OLLAMA_URL = "http://localhost:11434/api/generate"
+_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-MODEL_NAME = "qwen2.5:3b"
+MODEL_NAME = "gpt-4o-mini"
 
 
 def call_ollama(prompt):
-
-    payload = {
-        "model": MODEL_NAME,
-        "prompt": prompt,
-        "stream": False,
-        "options": {
-            "num_predict": 1000,
-            "temperature": 0
-        }
-    }
-
-    try:
-        response = requests.post(
-            OLLAMA_URL,
-            json=payload,
-            timeout=600
-        )
-
-        response.raise_for_status()
-
-        return response.json()["response"].strip()
-
-    except requests.RequestException as error:
-        raise RuntimeError(
-            f"Unable to communicate with Ollama: {error}"
-        )
+    """
+    Kept the function name for compatibility with the rest of the codebase.
+    Routes to OpenAI Chat Completions instead of Ollama.
+    """
+    response = _client.chat.completions.create(
+        model=MODEL_NAME,
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0,
+        max_tokens=1000
+    )
+    return response.choices[0].message.content.strip()
 
 
 def generate_answer(question, retrieved_chunks):
 
     context = "\n\n".join(
-        chunk["text"]
-        for chunk in retrieved_chunks
+        chunk["text"] for chunk in retrieved_chunks
     )
 
     prompt = f"""
@@ -72,6 +57,4 @@ Write a clear and complete answer.
 ANSWER:
 """
 
-    answer = call_ollama(prompt)
-
-    return answer
+    return call_ollama(prompt)
