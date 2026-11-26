@@ -1,23 +1,33 @@
-# Web framework
+# ============================================
+# Web Framework
+# ============================================
 fastapi
-uvicorn
+uvicorn[standard]
 python-multipart
 pydantic[email]
 
+# ============================================
 # Database
+# ============================================
 sqlalchemy
 psycopg2-binary
 pgvector
 
-# Auth
+# ============================================
+# Authentication
+# ============================================
 pwdlib[argon2]
 PyJWT
 
+# ============================================
 # Config / HTTP
+# ============================================
 python-dotenv
 requests
 
-# Document processing
+# ============================================
+# Document Processing
+# ============================================
 pymupdf
 python-docx
 pandas
@@ -26,7 +36,26 @@ xlrd
 python-pptx
 Pillow
 
+# ============================================
+# Vector Store (ChromaDB)
+# ============================================
+chromadb
+
+# ============================================
+# Embeddings & Reranking
+# ============================================
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch>=2.0.0
+sentence-transformers>=2.2.0
+
+# ============================================
+# Keyword / TF-IDF
+# ============================================
+scikit-learn
+
+# ============================================
 # AI / LLM
+# ============================================
 numpy
 openai
 langgraph
