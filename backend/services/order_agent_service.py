@@ -96,8 +96,7 @@ def find_product(products, question: str):
         if product_name in text:
             return product
 
-    # Partial / word-level match — handles "dell", "iphone",
-    # "boat airdopes", "samsung s25" etc.
+    # Partial / word-level match
     question_words = [
         w for w in re.findall(r"[a-zA-Z0-9]+", text)
         if len(w) > 2
@@ -276,33 +275,80 @@ Return ONLY valid JSON with these keys:
 
 Do not invent missing information.
 Use empty strings for missing fields.
+Do not add any other text, explanation, or markdown.
 
 User address:
 {address_text}
 """
 
+    raw = ""
+
     try:
-        response = call_ollama(prompt)
-        response = response.strip()
+        from openai import OpenAI
+        import os
 
-        if response.startswith("```"):
-            response = re.sub(r"^```(?:json)?\s*", "", response)
-            response = re.sub(r"\s*```$", "", response)
+        client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-        data = json.loads(response)
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "You extract structured address data. "
+                        "Reply with JSON only, no prose."
+                    ),
+                },
+                {"role": "user", "content": prompt},
+            ],
+            temperature=0,
+            response_format={"type": "json_object"},
+        )
 
-        required_fields = [
-            "address_line1", "city", "state", "postal_code", "country",
-        ]
+        raw = response.choices[0].message.content.strip()
 
-        for field in required_fields:
-            if not str(data.get(field, "")).strip():
-                return None
+    except Exception as error:
+        print("[ADDRESS PARSER] OpenAI call failed:", error)
 
-        return data
+        try:
+            raw = call_ollama(prompt).strip()
+        except Exception:
+            return None
 
-    except Exception:
+    if not raw:
         return None
+
+    raw = re.sub(r"^```(?:json)?\s*", "", raw)
+    raw = re.sub(r"\s*```$", "", raw)
+
+    match = re.search(r"\{.*\}", raw, re.DOTALL)
+    if not match:
+        print("[ADDRESS PARSER] No JSON object found in response:", raw[:200])
+        return None
+
+    try:
+        data = json.loads(match.group(0))
+    except Exception as error:
+        print("[ADDRESS PARSER] JSON parse failed:", error, "| raw:", raw[:200])
+        return None
+
+    if not isinstance(data, dict):
+        return None
+
+    cleaned = {
+        "address_line1": str(data.get("address_line1", "")).strip(),
+        "address_line2": str(data.get("address_line2", "")).strip(),
+        "city": str(data.get("city", "")).strip(),
+        "state": str(data.get("state", "")).strip(),
+        "postal_code": str(data.get("postal_code", "")).strip(),
+        "country": str(data.get("country", "")).strip() or "India",
+    }
+
+    if not cleaned["address_line1"] or not cleaned["city"]:
+        print("[ADDRESS PARSER] Missing required fields:", cleaned)
+        return None
+
+    return cleaned
 
 
 def save_new_address(db: Session, customer_id: str, address_data: dict):
@@ -443,10 +489,6 @@ def handle_customer_order(
 
     question = question.strip()
 
-    # KEY FIX: if there is a pending order state, we ALWAYS
-    # handle the message here — even if it doesn't match the
-    # "order request" phrases. The state machine knows what
-    # the user is supposed to type next.
     if not state and not is_order_request(question):
         return None
 
