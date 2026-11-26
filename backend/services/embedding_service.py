@@ -4,7 +4,7 @@ import requests
 
 HF_TOKEN = os.getenv("HF_TOKEN")
 MODEL = "sentence-transformers/all-MiniLM-L6-v2"
-API_URL = f"https://api-inference.huggingface.co/pipeline/feature-extraction/{MODEL}"
+API_URL = f"https://router.huggingface.co/hf-inference/models/{MODEL}"
 
 
 def _call_hf_api(inputs, timeout=120):
