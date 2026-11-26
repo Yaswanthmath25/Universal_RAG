@@ -1,0 +1,24 @@
+
+fastapi
+uvicorn
+streamlit
+sqlalchemy
+psycopg2-binary
+python-dotenv
+python-multipart
+chromadb
+sentence-transformers
+requests
+pymupdf
+python-docx
+passlib[bcrypt]
+python-jose[cryptography]
+
+# TF-IDF and relevance scoring
+scikit-learn
+numpy
+
+# Agentic RAG
+langgraph
+langchain-core
+langchain-community
