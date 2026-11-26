@@ -1,47 +1,30 @@
-
 from typing import List, Dict, Any
 
-from sentence_transformers import CrossEncoder
+import os
+import requests
 
 
-# --------------------------------------------------
-# CONFIGURATION
-# --------------------------------------------------
-
-RERANKER_MODEL_NAME = "cross-encoder/ms-marco-MiniLM-L-6-v2"
-
-RERANKER_DEVICE = "cpu"
-
-RERANKER_BATCH_SIZE = 8
-
-_reranker = None
+RERANKER_MODEL = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+RERANKER_API = f"https://api-inference.huggingface.co/models/{RERANKER_MODEL}"
+HF_TOKEN = os.getenv("HF_TOKEN")
 
 
-# --------------------------------------------------
-# LOAD CROSS-ENCODER MODEL
-# --------------------------------------------------
+def _call_reranker(question, chunk_texts):
+    headers = {}
+    if HF_TOKEN:
+        headers["Authorization"] = f"Bearer {HF_TOKEN}"
 
-def get_reranker():
+    pairs = [[question, text] for text in chunk_texts]
 
-    global _reranker
+    response = requests.post(
+        RERANKER_API,
+        headers=headers,
+        json={"inputs": pairs, "options": {"wait_for_model": True}},
+        timeout=120
+    )
+    response.raise_for_status()
+    return response.json()
 
-    if _reranker is None:
-
-        print("\nLoading Cross-Encoder Reranker...")
-
-        _reranker = CrossEncoder(
-            RERANKER_MODEL_NAME,
-            device=RERANKER_DEVICE
-        )
-
-        print("Cross-Encoder loaded successfully.")
-
-    return _reranker
-
-
-# --------------------------------------------------
-# RERANK DOCUMENTS
-# --------------------------------------------------
 
 def rerank_documents(
     question: str,
@@ -49,61 +32,31 @@ def rerank_documents(
     top_k: int = 5
 ) -> List[Dict[str, Any]]:
 
-    print("\n========== CROSS-ENCODER RERANKING ==========")
-
     if not chunks or top_k <= 0:
-        print("No chunks available for reranking.")
         return []
 
-    model = get_reranker()
+    try:
+        chunk_texts = [chunk.get("text", "") for chunk in chunks]
+        scores_raw = _call_reranker(question, chunk_texts)
 
-    pairs = []
+        scores = []
+        for item in scores_raw:
+            if isinstance(item, dict):
+                scores.append(float(item.get("score", 0.0)))
+            elif isinstance(item, list):
+                scores.append(float(item[0]) if item else 0.0)
+            else:
+                scores.append(float(item))
 
-    for chunk in chunks:
+        reranked = []
+        for chunk, score in zip(chunks, scores):
+            updated = dict(chunk)
+            updated["rerank_score"] = score
+            reranked.append(updated)
 
-        chunk_text = chunk.get("text", "")
+        reranked.sort(key=lambda x: x["rerank_score"], reverse=True)
+        return reranked[:top_k]
 
-        pairs.append(
-            (question, chunk_text)
-        )
-
-    scores = model.predict(
-        pairs,
-        batch_size=RERANKER_BATCH_SIZE,
-        show_progress_bar=False
-    )
-
-    reranked_chunks = []
-
-    for chunk, score in zip(chunks, scores):
-
-        updated_chunk = dict(chunk)
-
-        updated_chunk["rerank_score"] = float(score)
-
-        reranked_chunks.append(updated_chunk)
-
-    reranked_chunks.sort(
-        key=lambda item: item["rerank_score"],
-        reverse=True
-    )
-
-    final_chunks = reranked_chunks[:top_k]
-
-    print("Input chunks:", len(chunks))
-    print("Final reranked chunks:", len(final_chunks))
-
-    for index, chunk in enumerate(final_chunks, start=1):
-
-        print(f"\n--- RERANKED CHUNK {index} ---")
-
-        print("Rerank score:", chunk.get("rerank_score"))
-
-        print(
-            "Original relevance score:",
-            chunk.get("relevance_score")
-        )
-
-        print("Metadata:", chunk.get("metadata"))
-
-    return final_chunks
+    except Exception as error:
+        print(f"[RERANKER] Falling back to original order: {error}")
+        return chunks[:top_k]
