@@ -5,7 +5,7 @@ import requests
 
 
 RERANKER_MODEL = "cross-encoder/ms-marco-MiniLM-L-6-v2"
-RERANKER_API = f"https://api-inference.huggingface.co/models/{RERANKER_MODEL}"
+RERANKER_API = f"https://router.huggingface.co/hf-inference/models/{RERANKER_MODEL}"
 HF_TOKEN = os.getenv("HF_TOKEN")
 
 
