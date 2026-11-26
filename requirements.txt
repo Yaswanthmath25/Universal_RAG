@@ -12,7 +12,6 @@ requests
 pymupdf
 python-docx
 passlib[bcrypt]
-python-jose[cryptography]
 
 # TF-IDF and relevance scoring
 scikit-learn
