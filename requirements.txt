@@ -9,6 +9,7 @@ pymupdf
 python-docx
 pwdlib[argon2]
 PyJWT
+pydantic[email]
 numpy
 langgraph
 langchain-core
