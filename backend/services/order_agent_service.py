@@ -333,36 +333,10 @@ User address:
     raw = ""
 
     try:
-        from openai import OpenAI
-        import os
-
-        client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-
-        response = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {
-                    "role": "system",
-                    "content": (
-                        "You extract structured address data. "
-                        "Reply with JSON only, no prose."
-                    ),
-                },
-                {"role": "user", "content": prompt},
-            ],
-            temperature=0,
-            response_format={"type": "json_object"},
-        )
-
-        raw = response.choices[0].message.content.strip()
-
+        raw = call_ollama(prompt).strip()
     except Exception as error:
-        print("[ADDRESS PARSER] OpenAI call failed:", error)
-
-        try:
-            raw = call_ollama(prompt).strip()
-        except Exception:
-            return None
+        print("[ADDRESS PARSER] AI extraction failed:", error)
+        return None
 
     if not raw:
         return None

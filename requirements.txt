@@ -16,7 +16,6 @@ PyJWT
 # Config / HTTP
 python-dotenv
 requests
-huggingface-hub
 
 # Document processing
 pymupdf
@@ -35,7 +34,6 @@ scikit-learn
 
 # AI / LLM
 numpy
-openai
 langgraph
 langchain-core
 tiktoken

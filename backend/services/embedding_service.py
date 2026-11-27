@@ -1,22 +1,19 @@
-import os
-
-from openai import OpenAI
+from backend.services.cloudflare_ai import run_model
 
 
-MODEL = "text-embedding-3-small"
-_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+MODEL = "@cf/baai/bge-base-en-v1.5"
+BATCH_SIZE = 50
 
 
 def _embed_texts(texts):
     if not texts:
         return []
 
-    response = _client.embeddings.create(
-        model=MODEL,
-        input=texts,
-    )
-    # The API returns an index for each item; sort to preserve input order.
-    return [item.embedding for item in sorted(response.data, key=lambda item: item.index)]
+    result = run_model(MODEL, {"text": texts})
+    vectors = result.get("data") if isinstance(result, dict) else result
+    if not isinstance(vectors, list) or len(vectors) != len(texts):
+        raise RuntimeError("Cloudflare AI returned an unexpected embedding response")
+    return vectors
 
 
 def generate_embeddings(chunks):
@@ -24,12 +21,9 @@ def generate_embeddings(chunks):
         return []
 
     texts = [chunk["text"] for chunk in chunks]
-    batch_size = 100
     embeddings = []
-
-    for start in range(0, len(texts), batch_size):
-        embeddings.extend(_embed_texts(texts[start:start + batch_size]))
-
+    for start in range(0, len(texts), BATCH_SIZE):
+        embeddings.extend(_embed_texts(texts[start:start + BATCH_SIZE]))
     return embeddings
 
 

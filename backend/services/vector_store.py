@@ -1,4 +1,5 @@
 from pathlib import Path
+import os
 
 import chromadb
 from chromadb.config import Settings
@@ -8,15 +9,36 @@ CHROMA_DIR = Path(__file__).resolve().parents[2] / "chroma_db"
 CHROMA_DIR.mkdir(parents=True, exist_ok=True)
 
 
-client = chromadb.PersistentClient(
-    path=str(CHROMA_DIR),
-    settings=Settings(anonymized_telemetry=False),
-)
+cloud_config = {
+    "api_key": os.getenv("CHROMA_API_KEY"),
+    "tenant": os.getenv("CHROMA_TENANT"),
+    "database": os.getenv("CHROMA_DATABASE"),
+}
+
+if any(cloud_config.values()):
+    missing = [key for key, value in cloud_config.items() if not value]
+    if missing:
+        raise RuntimeError(
+            "Chroma Cloud configuration is incomplete. Set CHROMA_API_KEY, "
+            "CHROMA_TENANT, and CHROMA_DATABASE."
+        )
+    client = chromadb.CloudClient(**cloud_config)
+else:
+    # Keep local development simple when Chroma Cloud credentials are absent.
+    client = chromadb.PersistentClient(
+        path=str(CHROMA_DIR),
+        settings=Settings(anonymized_telemetry=False),
+    )
 
 
 collection = client.get_or_create_collection(
-    name="documents",
-    metadata={"hnsw:space": "l2"},
+    # This model produces 768-dimensional vectors, so keep its index isolated
+    # from any collection created with the previous embedding model.
+    name="documents_cf_bge_base_v1",
+    metadata={
+        "hnsw:space": "l2",
+        "embedding_model": "@cf/baai/bge-base-en-v1.5",
+    },
 )
 
 

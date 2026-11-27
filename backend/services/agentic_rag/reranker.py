@@ -1,60 +1,45 @@
-from typing import List, Dict, Any
+from typing import Any, Dict, List
 
-import os
-import requests
-
-
-RERANKER_MODEL = "cross-encoder/ms-marco-MiniLM-L-6-v2"
-RERANKER_API = f"https://router.huggingface.co/hf-inference/models/{RERANKER_MODEL}"
-HF_TOKEN = os.getenv("HF_TOKEN")
+from backend.services.cloudflare_ai import run_model
 
 
-def _call_reranker(question, chunk_texts):
-    headers = {}
-    if HF_TOKEN:
-        headers["Authorization"] = f"Bearer {HF_TOKEN}"
-
-    pairs = [[question, text] for text in chunk_texts]
-
-    response = requests.post(
-        RERANKER_API,
-        headers=headers,
-        json={"inputs": pairs, "options": {"wait_for_model": True}},
-        timeout=120
-    )
-    response.raise_for_status()
-    return response.json()
+RERANKER_MODEL = "@cf/baai/bge-reranker-base"
 
 
 def rerank_documents(
     question: str,
     chunks: List[Dict[str, Any]],
-    top_k: int = 5
+    top_k: int = 5,
 ) -> List[Dict[str, Any]]:
-
     if not chunks or top_k <= 0:
         return []
 
     try:
-        chunk_texts = [chunk.get("text", "") for chunk in chunks]
-        scores_raw = _call_reranker(question, chunk_texts)
+        result = run_model(
+            RERANKER_MODEL,
+            {
+                "query": question,
+                "contexts": [{"text": chunk.get("text", "")} for chunk in chunks],
+                "top_k": min(top_k, len(chunks)),
+            },
+        )
 
-        scores = []
-        for item in scores_raw:
-            if isinstance(item, dict):
-                scores.append(float(item.get("score", 0.0)))
-            elif isinstance(item, list):
-                scores.append(float(item[0]) if item else 0.0)
-            else:
-                scores.append(float(item))
+        ranked_items = result.get("response", [])
+        if not ranked_items:
+            raise RuntimeError("Cloudflare AI returned no reranking results")
 
         reranked = []
-        for chunk, score in zip(chunks, scores):
-            updated = dict(chunk)
-            updated["rerank_score"] = score
-            reranked.append(updated)
+        for rank, item in enumerate(ranked_items):
+            index = item.get("id", item.get("index", rank)) if isinstance(item, dict) else rank
+            score = item.get("score", 0.0) if isinstance(item, dict) else float(item)
+            index = int(index)
+            if 0 <= index < len(chunks):
+                updated = dict(chunks[index])
+                updated["rerank_score"] = float(score)
+                reranked.append(updated)
 
-        reranked.sort(key=lambda x: x["rerank_score"], reverse=True)
+        if not reranked:
+            raise RuntimeError("Cloudflare AI returned invalid reranking indices")
         return reranked[:top_k]
 
     except Exception as error:
