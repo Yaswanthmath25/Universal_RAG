@@ -1,8 +1,6 @@
 import re
-import numpy as np
-
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.metrics.pairwise import cosine_similarity
+import math
+from collections import Counter
 
 from backend.services.embedding_service import generate_query_embedding
 from backend.services.vector_store import collection
@@ -55,26 +53,62 @@ def normalize_text(text):
 def calculate_tfidf_scores(question, documents):
     if not documents:
         return []
-    try:
-        vectorizer = TfidfVectorizer(
-            stop_words="english",
-            ngram_range=(1, 2),
-            sublinear_tf=True,
-        )
-        doc_vectors = vectorizer.fit_transform(
-            [normalize_text(d) for d in documents]
-        )
-        q_vector = vectorizer.transform([normalize_text(question)])
-        return cosine_similarity(q_vector, doc_vectors)[0].tolist()
-    except ValueError:
+
+    def terms(text):
+        words = re.findall(r"\b[a-z0-9+#.]+\b", normalize_text(text))
+        unigrams = words
+        bigrams = [f"{left} {right}" for left, right in zip(words, words[1:])]
+        return unigrams + bigrams
+
+    document_terms = [terms(document) for document in documents]
+    question_counts = Counter(terms(question))
+    if not question_counts:
         return [0.0] * len(documents)
+
+    document_frequencies = Counter()
+    for tokens in document_terms:
+        document_frequencies.update(set(tokens))
+
+    document_count = len(documents)
+    idf = {
+        term: math.log((1 + document_count) / (1 + frequency)) + 1.0
+        for term, frequency in document_frequencies.items()
+    }
+    question_weights = {
+        term: (1.0 + math.log(count)) * idf.get(term, 0.0)
+        for term, count in question_counts.items()
+    }
+    question_norm = math.sqrt(sum(weight * weight for weight in question_weights.values()))
+    if not question_norm:
+        return [0.0] * len(documents)
+
+    scores = []
+    for tokens in document_terms:
+        term_counts = Counter(tokens)
+        document_weights = {
+            term: (1.0 + math.log(term_counts[term])) * idf[term]
+            for term in set(tokens)
+            if term in idf
+        }
+        document_norm = math.sqrt(
+            sum(weight * weight for weight in document_weights.values())
+        )
+        dot_product = sum(
+            question_weights.get(term, 0.0) * weight
+            for term, weight in document_weights.items()
+        )
+        scores.append(
+            dot_product / (question_norm * document_norm)
+            if document_norm
+            else 0.0
+        )
+    return scores
 
 
 def calculate_semantic_scores(distances):
     if len(distances) == 0:
         return []
-    distances = np.array(distances, dtype=float)
-    return (1.0 / (1.0 + np.maximum(distances, 0.0))).tolist()
+    return [1.0 / (1.0 + max(float(distance), 0.0)) for distance in distances]
 
 
 def search_documents(

@@ -1,13 +1,12 @@
 
 from pathlib import Path
 import csv
-import pandas as pd
-import pymupdf
 from docx import Document
 
 
 def extract_pdf(file_path):
     """Extract text from each PDF page."""
+    import pymupdf
 
     extracted_data = []
     pdf = pymupdf.open(file_path)
@@ -85,6 +84,7 @@ def extract_csv(file_path):
 
 def extract_excel(file_path):
     """Extract data from all Excel sheets."""
+    import pandas as pd
 
     extracted_data = []
 

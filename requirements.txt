@@ -29,11 +29,6 @@ Pillow
 # Vector store
 chromadb
 
-# Keyword / TF-IDF
-scikit-learn
-
 # AI / LLM
 numpy
 langgraph
-langchain-core
-tiktoken
