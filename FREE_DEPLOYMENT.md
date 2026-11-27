@@ -1,42 +1,34 @@
 # Low-cost deployment setup
 
-The backend can use Cloudflare Workers AI for chat, embeddings, and reranking,
-and Chroma Cloud for persistent vectors. Local development continues to use
-the on-disk Chroma database when Chroma Cloud credentials are not set.
+The backend runs Chroma locally in persistent-client mode. It does not connect
+to Chroma Cloud and needs no Chroma API key. Set `CHROMA_PATH` only if the host
+provides a persistent disk; otherwise the database is saved under `chroma_db`
+inside the project directory.
 
-## Required backend environment variables
+## AI service environment variables
 
-Set these on the Render **backend** service. Do not commit their values:
+The backend uses Cloudflare Workers AI for chat, embeddings, and reranking. Set
+these on the Render **backend** service. Do not commit their values:
 
 | Variable | Where to get it |
 | --- | --- |
 | `CLOUDFLARE_ACCOUNT_ID` | Cloudflare dashboard account details |
 | `CLOUDFLARE_API_TOKEN` | Cloudflare API token with Workers AI read and edit permissions |
-| `CHROMA_API_KEY` | Chroma Cloud database credentials |
-| `CHROMA_TENANT` | Chroma Cloud database credentials |
-| `CHROMA_DATABASE` | Chroma Cloud database credentials |
 
 Keep the existing database, authentication, and frontend `API_URL` settings.
-The backend no longer needs `OPENAI_API_KEY` or `HF_TOKEN` for its AI flows.
+The backend does not need `OPENAI_API_KEY`, `HF_TOKEN`, or any Chroma Cloud
+credentials for its AI and vector database flows.
 
 ## Setup and redeploy
 
 1. Create a Cloudflare account and enable Workers AI. Create an API token with
    Workers AI read and edit permissions.
-2. Create a Chroma Cloud database and copy its API key, tenant, and database
-   name.
-3. Add all five values above to the Render backend service's environment.
-4. Deploy the updated code. The backend creates a new
-   `documents_cf_bge_base_v1` collection in Chroma Cloud.
-5. Remove stale document records from the admin portal if they remain from the
-   previous deployment, then upload the documents again. Existing local vectors
-   are not copied to the new cloud collection.
+2. Add `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN` to the Render backend.
+3. Deploy the updated code and upload the documents again. The new Chroma
+   collection is `documents_cf_bge_base_v1` and starts empty.
 
 Cloudflare Workers AI has a daily free allowance; requests can stop when it is
-used up. Chroma Cloud currently includes $5 in starter credits and then charges
-based on usage. These services need credentials, but they do not use the old
-OpenAI API key.
-
-Render's free service has an ephemeral filesystem. Chroma vectors are stored in
-Chroma Cloud, but original uploaded files under the local `uploads` directory
-can disappear when Render restarts or redeploys.
+used up. Render's free service has an ephemeral filesystem, so locally stored
+Chroma vectors and uploaded source files can disappear when the service
+restarts, spins down, or redeploys. For durable Chroma data, the host must
+provide a persistent disk and `CHROMA_PATH` must point inside its mount path.

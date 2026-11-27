@@ -26,12 +26,6 @@ services:
         sync: false
       - key: CLOUDFLARE_API_TOKEN
         sync: false
-      - key: CHROMA_API_KEY
-        sync: false
-      - key: CHROMA_TENANT
-        sync: false
-      - key: CHROMA_DATABASE
-        sync: false
 
   - type: web
     name: nexamart-rag-frontend
