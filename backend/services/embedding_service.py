@@ -1,25 +1,22 @@
 import os
-import requests
+
+from openai import OpenAI
 
 
-HF_TOKEN = os.getenv("HF_TOKEN")
-MODEL = "sentence-transformers/all-MiniLM-L6-v2"
-API_URL = f"https://router.huggingface.co/hf-inference/models/{MODEL}"
+MODEL = "text-embedding-3-small"
+_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 
-def _call_hf_api(inputs, timeout=120):
-    headers = {}
-    if HF_TOKEN:
-        headers["Authorization"] = f"Bearer {HF_TOKEN}"
+def _embed_texts(texts):
+    if not texts:
+        return []
 
-    response = requests.post(
-        API_URL,
-        headers=headers,
-        json={"inputs": inputs, "options": {"wait_for_model": True}},
-        timeout=timeout
+    response = _client.embeddings.create(
+        model=MODEL,
+        input=texts,
     )
-    response.raise_for_status()
-    return response.json()
+    # The API returns an index for each item; sort to preserve input order.
+    return [item.embedding for item in sorted(response.data, key=lambda item: item.index)]
 
 
 def generate_embeddings(chunks):
@@ -27,22 +24,14 @@ def generate_embeddings(chunks):
         return []
 
     texts = [chunk["text"] for chunk in chunks]
+    batch_size = 100
+    embeddings = []
 
-    # HF API accepts up to ~100 inputs per call; batch to be safe.
-    BATCH_SIZE = 50
-    all_vectors = []
+    for start in range(0, len(texts), batch_size):
+        embeddings.extend(_embed_texts(texts[start:start + batch_size]))
 
-    for i in range(0, len(texts), BATCH_SIZE):
-        batch = texts[i:i + BATCH_SIZE]
-        vectors = _call_hf_api(batch)
-        all_vectors.extend(vectors)
-
-    return all_vectors
+    return embeddings
 
 
 def generate_query_embedding(question):
-    result = _call_hf_api(question, timeout=60)
-
-    if isinstance(result, list) and len(result) > 0 and isinstance(result[0], list):
-        return result[0]
-    return result
+    return _embed_texts([question])[0]
